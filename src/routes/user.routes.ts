@@ -69,20 +69,14 @@ router.post('/register',
   asyncHandler(async (req: Request, res: Response) => {
     const user = await userService.registerUser(req.body);
 
-    // Generate tokens for immediate login
-    const tokens = await authService.generateTokens(user);
-
-    // Return user info without sensitive data
+    // Remove sensitive data from response
     // eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars
-    const { passwordHash, ...userInfo } = user;
+    const { passwordHash, ...userResponse } = user;
 
     res.status(201).json({
       success: true,
-      data: {
-        user: userInfo,
-        tokens,
-      },
-      message: 'User registered successfully. Please check your email to verify your account.',
+      data: userResponse,
+      message: 'User registered successfully. Please wait for an organization invitation to access the system.',
     });
   })
 );

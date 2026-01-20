@@ -152,6 +152,9 @@ export const commonSchemas = {
   jwtToken: z.string()
     .min(1, 'Token is required')
     .regex(/^[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+$/, 'Invalid token format'),
+
+  // UUID validation
+  uuid: z.string().uuid('Invalid UUID format'),
 };
 
 /**

@@ -1,8 +1,9 @@
 import { Router, Request, Response } from 'express';
+import { z } from 'zod';
 import { authService } from '../services/auth.service';
 import { userService } from '../services/user.service';
 import { requireAuth, authRateLimit } from '../middleware/auth.middleware';
-import { validateRequest, authSchemas } from '../middleware/validation.middleware';
+import { validateRequest, authSchemas, commonSchemas } from '../middleware/validation.middleware';
 import { asyncHandler } from '../middleware/error.middleware';
 import { logger } from '../config/logger';
 
@@ -445,6 +446,186 @@ router.get('/me',
     res.json({
       success: true,
       data: userInfo,
+    });
+  })
+);
+
+/**
+ * @swagger
+ * /auth/organizations:
+ *   post:
+ *     summary: Get user organizations for login selection
+ *     description: Returns list of organizations that a user can access for login selection
+ *     tags: [Authentication]
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: 'john@example.com'
+ *     responses:
+ *       200:
+ *         description: User organizations retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               allOf:
+ *                 - $ref: '#/components/schemas/SuccessResponse'
+ *                 - type: object
+ *                   properties:
+ *                     data:
+ *                       type: object
+ *                       properties:
+ *                         organizations:
+ *                           type: array
+ *                           items:
+ *                             type: object
+ *                             properties:
+ *                               organizationId:
+ *                                 type: string
+ *                                 format: uuid
+ *                               organizationName:
+ *                                 type: string
+ *                               organizationSlug:
+ *                                 type: string
+ *                               role:
+ *                                 type: string
+ *                                 enum: [OWNER, ADMIN, MANAGER, MEMBER, VIEWER]
+ *       400:
+ *         description: Invalid email format
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       404:
+ *         description: User not found or no organizations
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.post('/organizations',
+  authRateLimit,
+  validateRequest({ 
+    body: z.object({
+      email: commonSchemas.email
+    })
+  }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { email } = req.body;
+
+    const organizations = await userService.getUserOrganizationsByEmail(email);
+
+    if (organizations.length === 0) {
+      return res.status(404).json({
+        error: {
+          code: 'NO_ORGANIZATIONS',
+          message: 'User has no active organization memberships',
+          requestId: req.id,
+          timestamp: new Date().toISOString(),
+        },
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        organizations,
+      },
+      message: 'Organizations retrieved successfully',
+    });
+  })
+);
+
+/**
+ * @swagger
+ * /auth/login-with-org:
+ *   post:
+ *     summary: Login with organization selection
+ *     description: Authenticate user with email, password, and selected organization
+ *     tags: [Authentication]
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - password
+ *               - organizationId
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: 'john@example.com'
+ *               password:
+ *                 type: string
+ *                 minLength: 8
+ *                 example: 'password123'
+ *               organizationId:
+ *                 type: string
+ *                 format: uuid
+ *                 example: '123e4567-e89b-12d3-a456-426614174000'
+ *     responses:
+ *       200:
+ *         description: Login successful
+ *         content:
+ *           application/json:
+ *             schema:
+ *               allOf:
+ *                 - $ref: '#/components/schemas/SuccessResponse'
+ *                 - type: object
+ *                   properties:
+ *                     data:
+ *                       $ref: '#/components/schemas/AuthTokens'
+ *                     message:
+ *                       type: string
+ *                       example: 'Login successful'
+ *       400:
+ *         description: Invalid credentials or organization access denied
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       401:
+ *         description: Authentication failed
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       429:
+ *         description: Too many login attempts
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.post('/login-with-org',
+  authRateLimit,
+  validateRequest({ 
+    body: z.object({
+      email: commonSchemas.email,
+      password: z.string().min(1, 'Password is required'),
+      organizationId: commonSchemas.uuid
+    })
+  }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const tokens = await authService.login(req.body);
+
+    res.json({
+      success: true,
+      data: tokens,
+      message: 'Login successful',
     });
   })
 );

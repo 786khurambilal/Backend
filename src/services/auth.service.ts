@@ -9,11 +9,14 @@ import { AuthenticationError } from '../middleware/error.middleware';
 export interface LoginCredentials {
   email: string;
   password: string;
+  organizationId: string; // Required - user must select organization
 }
 
 export interface TokenPayload {
   userId: string;
   email: string;
+  organizationId: string; // Required - always includes organization context
+  role: string; // User's role in the selected organization
   iat?: number;
   exp?: number;
 }
@@ -27,12 +30,12 @@ export interface RefreshTokenPayload {
 
 export class AuthService {
   /**
-   * Authenticate user with email and password, return JWT tokens
+   * Authenticate user with email, password, and organization selection
    */
   async login(credentials: LoginCredentials): Promise<AuthTokens> {
-    const { email, password } = credentials;
+    const { email, password, organizationId } = credentials;
 
-    // Find user by email
+    // Find user by email (global lookup)
     const user = await db<User>('users')
       .where({ email })
       .first();
@@ -47,22 +50,42 @@ export class AuthService {
       throw new AuthenticationError('Invalid credentials');
     }
 
-    // Generate tokens
-    const tokens = await this.generateTokens(user);
+    // Check if user has membership in the selected organization
+    const membership = await db('memberships')
+      .where({
+        userId: user.id,
+        organizationId: organizationId,
+        status: 'ACTIVE'
+      })
+      .first();
 
-    logger.info({ userId: user.id, email: user.email }, 'User logged in successfully');
+    if (!membership) {
+      throw new AuthenticationError('User does not have access to this organization');
+    }
+
+    // Generate tokens with organization context and role
+    const tokens = await this.generateTokens(user, organizationId, membership.role);
+
+    logger.info({ 
+      userId: user.id, 
+      email: user.email, 
+      organizationId,
+      role: membership.role 
+    }, 'User logged in successfully');
 
     return tokens;
   }
 
   /**
-   * Generate new access and refresh tokens for a user
+   * Generate new access and refresh tokens for a user with organization context
    */
-  async generateTokens(user: User): Promise<AuthTokens> {
-    // Generate access token
+  async generateTokens(user: User, organizationId: string, role: string): Promise<AuthTokens> {
+    // Generate access token with organization and role context
     const accessTokenPayload: TokenPayload = {
       userId: user.id,
       email: user.email,
+      organizationId,
+      role,
     };
 
     const accessToken = jwt.sign(
@@ -164,15 +187,11 @@ export class AuthService {
         throw new AuthenticationError('User not found');
       }
 
-      // Revoke old refresh token (token rotation)
-      await this.revokeRefreshToken(payload.tokenId);
+      // Get organization context from the stored token metadata
+      // For now, we'll require the client to re-login to select organization
+      // In a production system, you might store organization context with the refresh token
+      throw new AuthenticationError('Token refresh requires re-authentication with organization selection');
 
-      // Generate new tokens
-      const newTokens = await this.generateTokens(user);
-
-      logger.info({ userId: user.id }, 'Tokens refreshed successfully');
-
-      return newTokens;
     } catch (error) {
       logger.error({ error }, 'Failed to refresh tokens');
       throw new AuthenticationError('Invalid refresh token');

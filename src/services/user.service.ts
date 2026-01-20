@@ -167,6 +167,57 @@ export class UserService {
   }
 
   /**
+   * Get all organizations that a user belongs to
+   */
+  async getUserOrganizations(userId: string): Promise<Array<{
+    organizationId: string;
+    organizationName: string;
+    organizationSlug: string;
+    role: string;
+    status: string;
+    joinedAt: Date | null;
+  }>> {
+    const memberships = await db('memberships')
+      .join('organizations', 'memberships.organizationId', 'organizations.id')
+      .where('memberships.userId', userId)
+      .where('memberships.status', 'ACTIVE')
+      .select(
+        'memberships.organizationId',
+        'organizations.name as organizationName',
+        'organizations.slug as organizationSlug',
+        'memberships.role',
+        'memberships.status',
+        'memberships.joinedAt'
+      );
+
+    return memberships.map(membership => ({
+      organizationId: membership.organizationId,
+      organizationName: membership.organizationName,
+      organizationSlug: membership.organizationSlug,
+      role: membership.role,
+      status: membership.status,
+      joinedAt: membership.joinedAt ? new Date(membership.joinedAt) : null,
+    }));
+  }
+
+  /**
+   * Get user organizations by email (for login organization selection)
+   */
+  async getUserOrganizationsByEmail(email: string): Promise<Array<{
+    organizationId: string;
+    organizationName: string;
+    organizationSlug: string;
+    role: string;
+  }>> {
+    const user = await this.getUserByEmail(email);
+    if (!user) {
+      return [];
+    }
+
+    return await this.getUserOrganizations(user.id);
+  }
+
+  /**
    * Update user profile
    */
   async updateUserProfile(userId: string, updateData: UpdateUserProfileData): Promise<User> {
